@@ -5,14 +5,15 @@ import time
 import os
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from flask import Flask
+from flask import Flask, jsonify
 
 # ========== НАСТРОЙКИ ==========
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 if not TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN не найден! Добавьте его в переменные окружения Render.")
 
-bot = telebot.TeleBot(TOKEN, timeout=60)
+# Убираем timeout=60, так как текущая версия библиотеки его не поддерживает
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 ADMIN_ID = 6522832492
@@ -20,125 +21,148 @@ DB_FILE = "users.db"
 
 # ========== БАЗА ДАННЫХ ==========
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            balance INTEGER DEFAULT 0,
-            username TEXT,
-            last_open TEXT,
-            total_cards INTEGER DEFAULT 0,
-            total_sold INTEGER DEFAULT 0,
-            total_upgrades INTEGER DEFAULT 0,
-            total_failed INTEGER DEFAULT 0
-        )
-    ''')
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS inventory (
-            user_id INTEGER,
-            card_name TEXT,
-            count INTEGER DEFAULT 0,
-            PRIMARY KEY (user_id, card_name)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print("✅ База данных готова")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                balance INTEGER DEFAULT 0,
+                username TEXT,
+                last_open TEXT,
+                total_cards INTEGER DEFAULT 0,
+                total_sold INTEGER DEFAULT 0,
+                total_upgrades INTEGER DEFAULT 0,
+                total_failed INTEGER DEFAULT 0
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS inventory (
+                user_id INTEGER,
+                card_name TEXT,
+                count INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, card_name)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("✅ База данных готова")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка базы данных: {e}")
+        return False
 
 def get_user(uid):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT balance, username, last_open, total_cards, total_sold, total_upgrades, total_failed FROM users WHERE user_id = ?', (uid,))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if result:
-        return {
-            "balance": result[0],
-            "username": result[1] or "",
-            "last_open": result[2],
-            "stats": {
-                "total_cards": result[3] or 0,
-                "total_sold": result[4] or 0,
-                "total_upgrades": result[5] or 0,
-                "total_failed": result[6] or 0
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT balance, username, last_open, total_cards, total_sold, total_upgrades, total_failed FROM users WHERE user_id = ?', (uid,))
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            return {
+                "balance": result[0] or 0,
+                "username": result[1] or "",
+                "last_open": result[2],
+                "stats": {
+                    "total_cards": result[3] or 0,
+                    "total_sold": result[4] or 0,
+                    "total_upgrades": result[5] or 0,
+                    "total_failed": result[6] or 0
+                }
             }
-        }
-    return None
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка get_user: {e}")
+        return None
 
 def create_user(uid, username=""):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id, balance, username) VALUES (?, 0, ?)', (uid, username))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('INSERT OR IGNORE INTO users (user_id, balance, username) VALUES (?, 0, ?)', (uid, username))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка create_user: {e}")
+        return False
 
 def update_user(uid, data):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE users SET 
-            balance = ?,
-            username = ?,
-            last_open = ?,
-            total_cards = ?,
-            total_sold = ?,
-            total_upgrades = ?,
-            total_failed = ?
-        WHERE user_id = ?
-    ''', (
-        data.get("balance", 0),
-        data.get("username", ""),
-        data.get("last_open"),
-        data.get("stats", {}).get("total_cards", 0),
-        data.get("stats", {}).get("total_sold", 0),
-        data.get("stats", {}).get("total_upgrades", 0),
-        data.get("stats", {}).get("total_failed", 0),
-        uid
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users SET 
+                balance = ?,
+                username = ?,
+                last_open = ?,
+                total_cards = ?,
+                total_sold = ?,
+                total_upgrades = ?,
+                total_failed = ?
+            WHERE user_id = ?
+        ''', (
+            data.get("balance", 0),
+            data.get("username", ""),
+            data.get("last_open"),
+            data.get("stats", {}).get("total_cards", 0),
+            data.get("stats", {}).get("total_sold", 0),
+            data.get("stats", {}).get("total_upgrades", 0),
+            data.get("stats", {}).get("total_failed", 0),
+            uid
+        ))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка update_user: {e}")
+        return False
 
 def get_inventory(uid):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT card_name, count FROM inventory WHERE user_id = ? AND count > 0', (uid,))
-    result = cursor.fetchall()
-    conn.close()
-    return {card: count for card, count in result}
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT card_name, count FROM inventory WHERE user_id = ? AND count > 0', (uid,))
+        result = cursor.fetchall()
+        conn.close()
+        return {card: count for card, count in result}
+    except Exception as e:
+        print(f"❌ Ошибка get_inventory: {e}")
+        return {}
 
 def update_inventory(uid, card_name, change):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO inventory (user_id, card_name, count)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id, card_name) DO UPDATE SET count = count + ?
-    ''', (uid, card_name, change, change))
-    cursor.execute('DELETE FROM inventory WHERE user_id = ? AND card_name = ? AND count <= 0', (uid, card_name))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO inventory (user_id, card_name, count)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id, card_name) DO UPDATE SET count = count + ?
+        ''', (uid, card_name, change, change))
+        cursor.execute('DELETE FROM inventory WHERE user_id = ? AND card_name = ? AND count <= 0', (uid, card_name))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка update_inventory: {e}")
+        return False
 
 def get_all_users():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT user_id, balance, username FROM users')
-    result = cursor.fetchall()
-    conn.close()
-    return result
-
-def get_user_by_username(username):
-    username = username.lower().replace('@', '')
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT user_id, balance, username FROM users WHERE LOWER(username) = ?', (username,))
-    result = cursor.fetchone()
-    conn.close()
-    return result
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id, balance, username FROM users')
+        result = cursor.fetchall()
+        conn.close()
+        return result
+    except Exception as e:
+        print(f"❌ Ошибка get_all_users: {e}")
+        return []
 
 # ========== ПОДАРКИ ==========
 CARDS = [
@@ -756,7 +780,7 @@ def start_bot():
     
     while True:
         try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=60)
+            bot.infinity_polling()
         except Exception as e:
             print(f"❌ Ошибка в боте: {e}")
             time.sleep(5)
